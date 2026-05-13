@@ -4,6 +4,8 @@ import datetime
 import sys
 import shutil
 import requests
+import time
+from pathlib import Path
 
 from file_manager import (
     buscar_por_palabras_clave,
@@ -23,6 +25,16 @@ from memory import (
     inicializar_memoria
 )
 
+from system_tools import (
+    resumen_estado_sistema,
+    resumen_ram,
+    resumen_cpu,
+    resumen_disco,
+    resumen_red,
+    resumen_ip,
+    resumen_temperatura
+)
+
 
 # ==========================
 # CONFIGURACIÓN GENERAL
@@ -38,12 +50,16 @@ PALABRAS_ACTIVACION = [
 
 MODELO_OLLAMA = "llama3:latest"
 
+BASE_DIR = Path.home() / "ARGOS"
+VOICE_MODEL = BASE_DIR / "voices" / "es_MX-ald-medium.onnx"
+TTS_OUTPUT = BASE_DIR / "data" / "argos_voice.wav"
+
 r = sr.Recognizer()
 proceso_voz = None
 
 
 # ==========================
-# VOZ DE A.R.G.O.S.
+# VOZ DE A.R.G.O.S. CON PIPER
 # ==========================
 
 def detener_voz():
@@ -55,7 +71,13 @@ def detener_voz():
             proceso_voz = None
 
         subprocess.run(
-            ["pkill", "-f", "espeak-ng"],
+            ["pkill", "-f", "aplay"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        subprocess.run(
+            ["pkill", "-f", "piper"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -64,22 +86,82 @@ def detener_voz():
         pass
 
 
+def esperar_fin_de_voz():
+    global proceso_voz
+
+    try:
+        if proceso_voz:
+            proceso_voz.wait()
+            proceso_voz = None
+
+        time.sleep(0.35)
+
+    except Exception:
+        pass
+
+
+def limpiar_texto_para_voz(texto):
+    texto = str(texto)
+
+    reemplazos = {
+        "A.R.G.O.S.": "Argos",
+        "A.R.G.O.S": "Argos",
+        "CPU": "procesador",
+        "RAM": "ram",
+        "GB": "gigabytes",
+        "MB": "megabytes",
+        "°C": "grados Celsius",
+        "%": "por ciento",
+        "/": " ",
+        "\\": " ",
+        '"': "'"
+    }
+
+    for original, reemplazo in reemplazos.items():
+        texto = texto.replace(original, reemplazo)
+
+    return texto.strip()
+
+
 def hablar(texto):
     global proceso_voz
 
     print(f"A.R.G.O.S.: {texto}")
 
-    texto_limpio = str(texto).replace('"', "'")
+    texto_limpio = limpiar_texto_para_voz(texto)
 
     try:
         detener_voz()
+
+        if not VOICE_MODEL.exists():
+            print(f"No encontré el modelo de voz: {VOICE_MODEL}")
+            return
+
+        TTS_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+
+        subprocess.run(
+            [
+                "piper",
+                "--model",
+                str(VOICE_MODEL),
+                "--output_file",
+                str(TTS_OUTPUT)
+            ],
+            input=texto_limpio,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=60
+        )
+
         proceso_voz = subprocess.Popen(
-            ["espeak-ng", "-v", "es", texto_limpio],
+            ["aplay", "-q", str(TTS_OUTPUT)],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
+
     except Exception as e:
-        print(f"No pude reproducir voz: {e}")
+        print(f"No pude reproducir voz con Piper: {e}")
 
 
 def responder_y_guardar(comando, respuesta, source="local"):
@@ -300,8 +382,10 @@ def comando_crear_carpeta(comando):
         "crear una carpeta",
         "crea carpeta",
         "crear carpeta",
-        "en escritorio",
         "en el escritorio",
+        "en escritorio",
+        "escritorio",
+        "desktop",
         "y abrela",
         "y ábrela",
         "abrela",
@@ -311,9 +395,9 @@ def comando_crear_carpeta(comando):
     ]
 
     for frase in frases_a_quitar:
-        nombre = nombre.replace(frase, "")
+        nombre = nombre.replace(frase, " ")
 
-    nombre = nombre.strip()
+    nombre = " ".join(nombre.split()).strip()
 
     if not nombre:
         respuesta = "Dime el nombre de la carpeta."
@@ -364,6 +448,8 @@ def limpiar_nombre_para_borrar(comando):
         "esta en el escritorio",
         "en el escritorio",
         "en escritorio",
+        "escritorio",
+        "desktop",
         "la",
         "el",
         "mi",
@@ -388,13 +474,6 @@ def detectar_tipo_borrado(comando):
 
 
 def comando_borrar_elemento(comando):
-    """
-    Manda archivos o carpetas a la Papelera.
-    Ejemplos:
-    - argos borra la carpeta pipe que está en el escritorio
-    - argos elimina el archivo prueba
-    - argos manda a la papelera pipe
-    """
     tipo = detectar_tipo_borrado(comando)
     consulta = limpiar_nombre_para_borrar(comando)
 
@@ -405,7 +484,7 @@ def comando_borrar_elemento(comando):
 
     resultados = []
 
-    if "escritorio" in comando:
+    if "escritorio" in comando or "desktop" in comando:
         resultados = buscar_en_escritorio(consulta, tipo=tipo, limite=5)
 
     if not resultados:
@@ -510,6 +589,160 @@ def comando_buscar_memoria(comando):
 
 
 # ==========================
+# ESTADO DEL SISTEMA
+# ==========================
+
+def comando_estado_sistema(comando):
+    if (
+        "estado del sistema" in comando
+        or "cómo está el sistema" in comando
+        or "como está el sistema" in comando
+        or "como esta el sistema" in comando
+        or "reporte del sistema" in comando
+        or "diagnóstico del sistema" in comando
+        or "diagnostico del sistema" in comando
+    ):
+        respuesta = resumen_estado_sistema()
+
+    elif (
+        "cuál es mi ip" in comando
+        or "cual es mi ip" in comando
+        or "dime mi ip" in comando
+        or "ip local" in comando
+        or comando.strip() == "ip"
+        or comando.strip() == "mi ip"
+    ):
+        respuesta = resumen_ip()
+
+    elif (
+        "ram" in comando
+        or "memoria ram" in comando
+        or ("memoria" in comando and "sistema" in comando)
+    ):
+        respuesta = resumen_ram()
+
+    elif (
+        "cpu" in comando
+        or "procesador" in comando
+        or "uso del procesador" in comando
+    ):
+        respuesta = resumen_cpu()
+
+    elif (
+        "disco" in comando
+        or "almacenamiento" in comando
+        or "espacio" in comando
+    ):
+        respuesta = resumen_disco()
+
+    elif (
+        "red" in comando
+        or "internet" in comando
+        or "conexión" in comando
+        or "conexion" in comando
+    ):
+        respuesta = resumen_red()
+
+    elif (
+        "temperatura" in comando
+        or "caliente" in comando
+        or "grados" in comando
+    ):
+        respuesta = resumen_temperatura()
+
+    else:
+        respuesta = resumen_estado_sistema()
+
+    print("\nEstado del sistema:")
+    print(respuesta)
+    print()
+
+    responder_y_guardar(comando, respuesta, source="system_status")
+
+
+def es_comando_estado_sistema(comando):
+    frases_clave = [
+        "estado del sistema",
+        "cómo está el sistema",
+        "como está el sistema",
+        "como esta el sistema",
+        "reporte del sistema",
+        "diagnóstico del sistema",
+        "diagnostico del sistema",
+        "memoria ram",
+        "uso del procesador",
+        "cuál es mi ip",
+        "cual es mi ip",
+        "dime mi ip",
+        "ip local",
+        "mi ip",
+        "temperatura del procesador",
+        "espacio en disco",
+        "cuánto espacio",
+        "cuanto espacio",
+        "cómo está la red",
+        "como esta la red",
+        "cómo está el internet",
+        "como esta el internet"
+    ]
+
+    palabras_exactas = comando.split()
+
+    if any(frase in comando for frase in frases_clave):
+        return True
+
+    if "ram" in palabras_exactas:
+        return True
+
+    if "cpu" in palabras_exactas:
+        return True
+
+    if "procesador" in palabras_exactas:
+        return True
+
+    if "disco" in palabras_exactas:
+        return True
+
+    if "red" in palabras_exactas:
+        return True
+
+    if "internet" in palabras_exactas:
+        return True
+
+    if "temperatura" in palabras_exactas:
+        return True
+
+    if comando.strip() == "ip":
+        return True
+
+    return False
+
+
+# ==========================
+# DETECTORES DE COMANDOS
+# ==========================
+
+def es_comando_crear_carpeta(comando):
+    return (
+        "crea una carpeta" in comando
+        or "crear una carpeta" in comando
+        or "crea carpeta" in comando
+        or "crear carpeta" in comando
+    )
+
+
+def es_comando_borrar(comando):
+    return (
+        "borra" in comando
+        or "borrar" in comando
+        or "elimina" in comando
+        or "eliminar" in comando
+        or "manda a la papelera" in comando
+        or "mueve a la papelera" in comando
+    )
+
+
+# ==========================
 # COMANDOS DE A.R.G.O.S.
 # ==========================
 
@@ -517,7 +750,6 @@ def ejecutar_comando(comando):
     comando = comando.lower().strip()
     print("Comando recibido:", comando)
 
-    # CONTROL DE VOZ
     if (
         comando == "alto"
         or comando == "callate"
@@ -533,7 +765,6 @@ def ejecutar_comando(comando):
         guardar_conversacion(comando, respuesta, source="system")
         return
 
-    # NAVEGADOR / WEBS
     if "youtube" in comando:
         respuesta = "Abriendo YouTube."
         hablar(respuesta)
@@ -552,7 +783,6 @@ def ejecutar_comando(comando):
         abrir_url("https://google.com")
         guardar_conversacion(comando, respuesta, source="apps")
 
-    # PROGRAMAS
     elif "terminal" in comando:
         if abrir_terminal():
             respuesta = "Abriendo la terminal."
@@ -601,7 +831,24 @@ def ejecutar_comando(comando):
 
         responder_y_guardar(comando, respuesta, source="apps")
 
-    # MEMORIA
+    # IMPORTANTE:
+    # Los comandos de archivos van antes que estado del sistema.
+    # Así evitamos que una carpeta llamada "pipe" active el comando "ip".
+    elif es_comando_borrar(comando):
+        comando_borrar_elemento(comando)
+
+    elif es_comando_crear_carpeta(comando):
+        comando_crear_carpeta(comando)
+
+    elif "pdf" in comando or "pdfs" in comando:
+        comando_mostrar_pdfs(comando)
+
+    elif "busca" in comando or "buscar" in comando:
+        comando_buscar_archivo(comando)
+
+    elif es_comando_estado_sistema(comando):
+        comando_estado_sistema(comando)
+
     elif (
         "recuerda que" in comando
         or "recuérdame que" in comando
@@ -626,27 +873,6 @@ def ejecutar_comando(comando):
     ):
         comando_buscar_memoria(comando)
 
-    # ARCHIVOS
-    elif (
-        "borra" in comando
-        or "borrar" in comando
-        or "elimina" in comando
-        or "eliminar" in comando
-        or "manda a la papelera" in comando
-        or "mueve a la papelera" in comando
-    ):
-        comando_borrar_elemento(comando)
-
-    elif "crea una carpeta" in comando or "crear una carpeta" in comando or "crea carpeta" in comando or "crear carpeta" in comando:
-        comando_crear_carpeta(comando)
-
-    elif "pdf" in comando or "pdfs" in comando:
-        comando_mostrar_pdfs(comando)
-
-    elif "busca" in comando or "buscar" in comando:
-        comando_buscar_archivo(comando)
-
-    # FECHA Y HORA
     elif "hora" in comando:
         hora = datetime.datetime.now().strftime("%H:%M")
         respuesta = f"Son las {hora}"
@@ -657,16 +883,17 @@ def ejecutar_comando(comando):
         respuesta = f"Hoy es {fecha}"
         responder_y_guardar(comando, respuesta, source="time")
 
-    # CONTROL DEL ASISTENTE
     elif "salir" in comando or "apágate" in comando or "apagate" in comando or "cerrar" in comando:
         respuesta = "Cerrando A.R.G.O.S."
         hablar(respuesta)
         guardar_conversacion(comando, respuesta, source="system")
+        esperar_fin_de_voz()
         sys.exit()
 
-    # IA LOCAL
     else:
         hablar("Consultando mi inteligencia local.")
+        esperar_fin_de_voz()
+
         respuesta = preguntar_a_ollama(comando)
 
         print("\nRespuesta IA:")
@@ -682,6 +909,8 @@ def ejecutar_comando(comando):
 # ==========================
 
 def escuchar():
+    esperar_fin_de_voz()
+
     with sr.Microphone() as source:
         print("Escuchando...")
         r.adjust_for_ambient_noise(source, duration=0.5)
@@ -765,7 +994,7 @@ def main():
 
         else:
             print("No dijiste la palabra de activación.")
-            print("Ejemplo: argos borra la carpeta pipe que está en el escritorio")
+            print("Ejemplo: argos crea una carpeta llamada pipe en escritorio")
 
 
 if __name__ == "__main__":
