@@ -2,6 +2,9 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 import subprocess
+import threading
+import time
+import re
 
 from system_tools import (
     resumen_estado_sistema,
@@ -15,6 +18,21 @@ BASE_DIR = HOME / "ARGOS"
 REPORTS_DIR = BASE_DIR / "reports"
 BACKUPS_DIR = BASE_DIR / "backups"
 
+
+# ==========================
+# ESTADO DE AUTOMATIZACIONES
+# ==========================
+
+monitor_temperatura_activo = False
+monitor_temperatura_thread = None
+monitor_temperatura_limite = 80
+monitor_temperatura_intervalo = 60
+ultima_alerta_temperatura = 0
+
+
+# ==========================
+# AUTOMATIZACIONES BÁSICAS
+# ==========================
 
 def abrir_apps_trabajo():
     """
@@ -147,3 +165,127 @@ def revisar_temperatura_simple(limite=80):
         return f"Alerta. La temperatura está en {temperatura} grados Celsius, supera el límite de {limite} grados."
 
     return f"La temperatura está normal: {temperatura} grados Celsius. El límite configurado es {limite} grados."
+
+
+# ==========================
+# MONITOR DE TEMPERATURA EN SEGUNDO PLANO
+# ==========================
+
+def extraer_numero(texto, valor_default=80):
+    """
+    Extrae el primer número de un comando.
+    Ejemplo: 'activa alerta a 75 grados' -> 75
+    """
+    coincidencias = re.findall(r"\d+", texto)
+
+    if not coincidencias:
+        return valor_default
+
+    try:
+        return int(coincidencias[0])
+    except Exception:
+        return valor_default
+
+
+def _monitor_temperatura_loop(callback_alerta):
+    """
+    Hilo de monitoreo.
+    callback_alerta debe ser una función que reciba texto, por ejemplo hablar().
+    """
+    global monitor_temperatura_activo
+    global monitor_temperatura_limite
+    global monitor_temperatura_intervalo
+    global ultima_alerta_temperatura
+
+    while monitor_temperatura_activo:
+        try:
+            temp = obtener_temperatura()
+
+            if temp["disponible"] and temp["temperatura"] is not None:
+                temperatura = temp["temperatura"]
+
+                if temperatura >= monitor_temperatura_limite:
+                    ahora = time.time()
+
+                    # Evita repetir alertas cada segundo.
+                    # Solo alerta de nuevo si pasaron 5 minutos.
+                    if ahora - ultima_alerta_temperatura >= 300:
+                        ultima_alerta_temperatura = ahora
+                        mensaje = (
+                            f"Alerta de temperatura. "
+                            f"El procesador está en {temperatura} grados Celsius. "
+                            f"El límite configurado es {monitor_temperatura_limite} grados."
+                        )
+                        callback_alerta(mensaje)
+
+            time.sleep(monitor_temperatura_intervalo)
+
+        except Exception as e:
+            callback_alerta(f"Ocurrió un error en el monitor de temperatura: {e}")
+            time.sleep(monitor_temperatura_intervalo)
+
+
+def activar_alerta_temperatura(limite=80, intervalo=60, callback_alerta=None):
+    """
+    Activa un monitor de temperatura en segundo plano.
+    """
+    global monitor_temperatura_activo
+    global monitor_temperatura_thread
+    global monitor_temperatura_limite
+    global monitor_temperatura_intervalo
+    global ultima_alerta_temperatura
+
+    monitor_temperatura_limite = int(limite)
+    monitor_temperatura_intervalo = int(intervalo)
+    ultima_alerta_temperatura = 0
+
+    if callback_alerta is None:
+        callback_alerta = print
+
+    if monitor_temperatura_activo:
+        return f"La alerta de temperatura ya estaba activa. Actualicé el límite a {monitor_temperatura_limite} grados."
+
+    monitor_temperatura_activo = True
+
+    monitor_temperatura_thread = threading.Thread(
+        target=_monitor_temperatura_loop,
+        args=(callback_alerta,),
+        daemon=True
+    )
+
+    monitor_temperatura_thread.start()
+
+    return (
+        f"Alerta de temperatura activada. "
+        f"Te avisaré si pasa de {monitor_temperatura_limite} grados Celsius."
+    )
+
+
+def desactivar_alerta_temperatura():
+    """
+    Desactiva el monitor de temperatura.
+    """
+    global monitor_temperatura_activo
+
+    if not monitor_temperatura_activo:
+        return "La alerta de temperatura no estaba activa."
+
+    monitor_temperatura_activo = False
+
+    return "Alerta de temperatura desactivada."
+
+
+def estado_automatizaciones():
+    """
+    Devuelve estado de automatizaciones activas.
+    """
+    estados = []
+
+    if monitor_temperatura_activo:
+        estados.append(
+            f"Alerta de temperatura activa con límite de {monitor_temperatura_limite} grados Celsius."
+        )
+    else:
+        estados.append("Alerta de temperatura desactivada.")
+
+    return " ".join(estados)

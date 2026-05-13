@@ -39,7 +39,11 @@ from automation import (
     abrir_apps_trabajo,
     crear_reporte_sistema,
     backup_escritorio,
-    revisar_temperatura_simple
+    revisar_temperatura_simple,
+    activar_alerta_temperatura,
+    desactivar_alerta_temperatura,
+    estado_automatizaciones,
+    extraer_numero
 )
 
 
@@ -756,9 +760,40 @@ def comando_automatizacion(comando):
         respuesta = backup_escritorio()
 
     elif (
+        "activa alerta de temperatura" in comando
+        or "activar alerta de temperatura" in comando
+        or "avísame si la temperatura" in comando
+        or "avisame si la temperatura" in comando
+        or "alerta si la temperatura" in comando
+        or "si la temperatura pasa" in comando
+    ):
+        limite = extraer_numero(comando, valor_default=80)
+        respuesta = activar_alerta_temperatura(
+            limite=limite,
+            intervalo=60,
+            callback_alerta=hablar
+        )
+
+    elif (
+        "desactiva alerta de temperatura" in comando
+        or "desactivar alerta de temperatura" in comando
+        or "detén alerta de temperatura" in comando
+        or "deten alerta de temperatura" in comando
+        or "apaga alerta de temperatura" in comando
+    ):
+        respuesta = desactivar_alerta_temperatura()
+
+    elif (
+        "estado de automatizaciones" in comando
+        or "automatizaciones activas" in comando
+        or "qué automatizaciones están activas" in comando
+        or "que automatizaciones estan activas" in comando
+    ):
+        respuesta = estado_automatizaciones()
+
+    elif (
         "revisa la temperatura" in comando
         or "revisar temperatura" in comando
-        or "alerta de temperatura" in comando
         or "temperatura crítica" in comando
         or "temperatura critica" in comando
     ):
@@ -791,9 +826,23 @@ def es_comando_automatizacion(comando):
         "copia de seguridad de mi escritorio",
         "revisa la temperatura",
         "revisar temperatura",
-        "alerta de temperatura",
         "temperatura crítica",
-        "temperatura critica"
+        "temperatura critica",
+        "activa alerta de temperatura",
+        "activar alerta de temperatura",
+        "avísame si la temperatura",
+        "avisame si la temperatura",
+        "alerta si la temperatura",
+        "si la temperatura pasa",
+        "desactiva alerta de temperatura",
+        "desactivar alerta de temperatura",
+        "detén alerta de temperatura",
+        "deten alerta de temperatura",
+        "apaga alerta de temperatura",
+        "estado de automatizaciones",
+        "automatizaciones activas",
+        "qué automatizaciones están activas",
+        "que automatizaciones estan activas"
     ]
 
     return any(frase in comando for frase in frases)
