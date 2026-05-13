@@ -6,6 +6,20 @@ import sys
 import shutil
 import requests
 
+from file_manager import (
+    buscar_por_palabras_clave,
+    listar_pdfs_por_tema,
+    crear_carpeta_en_escritorio,
+    abrir_ruta
+)
+
+from memory import (
+    guardar_memoria,
+    buscar_memorias,
+    formatear_memorias,
+    inicializar_memoria
+)
+
 
 # ==========================
 # CONFIGURACIÓN GENERAL
@@ -19,7 +33,7 @@ PALABRAS_ACTIVACION = [
     "asistente"
 ]
 
-# Modelo instalado en tu Ollama
+# Modelo instalado en Ollama
 MODELO_OLLAMA = "llama3:latest"
 
 r = sr.Recognizer()
@@ -35,7 +49,7 @@ def hablar(texto):
     """
     print(f"A.R.G.O.S.: {texto}")
 
-    texto_limpio = texto.replace('"', "'")
+    texto_limpio = str(texto).replace('"', "'")
     os.system(f'espeak-ng -v es "{texto_limpio}"')
 
 
@@ -47,7 +61,10 @@ def abrir_url(url):
     """
     Abre una URL en Firefox.
     """
-    subprocess.Popen(["firefox", url])
+    try:
+        subprocess.Popen(["firefox", url])
+    except Exception as e:
+        hablar(f"No pude abrir Firefox. Error: {e}")
 
 
 def abrir_terminal():
@@ -100,6 +117,17 @@ def abrir_vscode():
         hablar("No encontré Visual Studio Code instalado.")
 
 
+def abrir_programa(nombre_programa):
+    """
+    Intenta abrir un programa por nombre.
+    """
+    if shutil.which(nombre_programa):
+        subprocess.Popen([nombre_programa])
+        hablar(f"Abriendo {nombre_programa}.")
+    else:
+        hablar(f"No encontré el programa {nombre_programa} instalado.")
+
+
 # ==========================
 # CONEXIÓN CON OLLAMA
 # ==========================
@@ -149,6 +177,227 @@ Pregunta del usuario:
 
 
 # ==========================
+# MANEJO DE ARCHIVOS
+# ==========================
+
+def comando_buscar_archivo(comando):
+    """
+    Busca archivos por palabras clave.
+    Ejemplos:
+    - argos busca mi tesis
+    - argos busca documento vidanta
+    """
+    consulta = comando
+
+    palabras_a_quitar = [
+        "busca",
+        "buscar",
+        "archivo",
+        "archivos",
+        "documento",
+        "documentos",
+        "mi",
+        "mis"
+    ]
+
+    for palabra in palabras_a_quitar:
+        consulta = consulta.replace(palabra, "")
+
+    consulta = consulta.strip()
+
+    if not consulta:
+        hablar("Dime qué archivo quieres buscar.")
+        return
+
+    resultados = buscar_por_palabras_clave(consulta.split(), limite=5)
+
+    if not resultados:
+        hablar("No encontré archivos relacionados.")
+        return
+
+    hablar(f"Encontré {len(resultados)} archivos relacionados.")
+    print("\nResultados encontrados:")
+
+    for i, archivo in enumerate(resultados, start=1):
+        print(f"{i}. {archivo}")
+
+    print()
+    hablar("Abriré el primer resultado.")
+    abrir_ruta(resultados[0])
+
+
+def comando_mostrar_pdfs(comando):
+    """
+    Busca PDFs relacionados con un tema.
+    Ejemplos:
+    - argos muéstrame pdfs de vidanta
+    - argos busca pdfs de tesis
+    """
+    tema = comando
+
+    palabras_a_quitar = [
+        "muéstrame",
+        "muestrame",
+        "mostrar",
+        "muestra",
+        "busca",
+        "buscar",
+        "pdfs",
+        "pdf",
+        "de",
+        "del",
+        "la",
+        "el",
+        "los",
+        "las"
+    ]
+
+    for palabra in palabras_a_quitar:
+        tema = tema.replace(palabra, "")
+
+    tema = tema.strip()
+
+    if not tema:
+        hablar("Dime el tema de los PDFs que quieres buscar.")
+        return
+
+    resultados = listar_pdfs_por_tema(tema, limite=10)
+
+    if not resultados:
+        hablar("No encontré PDFs relacionados.")
+        return
+
+    hablar(f"Encontré {len(resultados)} PDFs relacionados.")
+    print("\nPDFs encontrados:")
+
+    for i, archivo in enumerate(resultados, start=1):
+        print(f"{i}. {archivo}")
+
+    print()
+    hablar("Abriré el primer PDF encontrado.")
+    abrir_ruta(resultados[0])
+
+
+def comando_crear_carpeta(comando):
+    """
+    Crea una carpeta en el escritorio y la abre.
+    Ejemplo:
+    - argos crea una carpeta llamada pipe en escritorio y ábrela
+    """
+    nombre = comando
+
+    frases_a_quitar = [
+        "crea una carpeta llamada",
+        "crear una carpeta llamada",
+        "crea carpeta llamada",
+        "crear carpeta llamada",
+        "crea una carpeta",
+        "crear una carpeta",
+        "crea carpeta",
+        "crear carpeta",
+        "en escritorio",
+        "en el escritorio",
+        "y abrela",
+        "y ábrela",
+        "abrela",
+        "ábrela",
+        "abre la",
+        "abrirla"
+    ]
+
+    for frase in frases_a_quitar:
+        nombre = nombre.replace(frase, "")
+
+    nombre = nombre.strip()
+
+    if not nombre:
+        hablar("Dime el nombre de la carpeta.")
+        return
+
+    resultado = crear_carpeta_en_escritorio(nombre)
+    hablar(resultado)
+
+
+# ==========================
+# MEMORIA
+# ==========================
+
+def comando_guardar_memoria(comando):
+    """
+    Guarda una memoria.
+    Ejemplos:
+    - argos recuerda que hablamos del examen de física el 12/01/2026
+    - argos guarda en memoria que mi proyecto se llama ARGOS
+    """
+    contenido = comando
+
+    frases_a_quitar = [
+        "recuerda que",
+        "recuerdame que",
+        "recuérdame que",
+        "guarda en memoria que",
+        "guarda en memoria",
+        "memoriza que",
+        "aprende que"
+    ]
+
+    for frase in frases_a_quitar:
+        contenido = contenido.replace(frase, "")
+
+    contenido = contenido.strip()
+
+    if not contenido:
+        hablar("Dime qué quieres que recuerde.")
+        return
+
+    respuesta = guardar_memoria(contenido)
+    hablar(respuesta)
+
+
+def comando_buscar_memoria(comando):
+    """
+    Busca recuerdos guardados.
+    Ejemplos:
+    - argos cuándo hablamos del examen de física
+    - argos qué recuerdas de vidanta
+    """
+    consulta = comando
+
+    frases_a_quitar = [
+        "cuando hablamos de",
+        "cuándo hablamos de",
+        "cuando hablamos",
+        "cuándo hablamos",
+        "que recuerdas de",
+        "qué recuerdas de",
+        "que recuerdas",
+        "qué recuerdas",
+        "recuerdas algo de",
+        "recuerdas algo sobre",
+        "busca en memoria",
+        "busca en tu memoria"
+    ]
+
+    for frase in frases_a_quitar:
+        consulta = consulta.replace(frase, "")
+
+    consulta = consulta.strip()
+
+    if not consulta:
+        hablar("Dime qué quieres que busque en mi memoria.")
+        return
+
+    resultados = buscar_memorias(consulta)
+    respuesta = formatear_memorias(resultados)
+
+    print("\nMemoria:")
+    print(respuesta)
+    print()
+
+    hablar(respuesta)
+
+
+# ==========================
 # COMANDOS DE A.R.G.O.S.
 # ==========================
 
@@ -158,9 +407,13 @@ def ejecutar_comando(comando):
     Si no reconoce el comando, consulta a Ollama.
     """
 
+    comando = comando.lower().strip()
     print("Comando recibido:", comando)
 
+    # ==========================
     # NAVEGADOR / WEBS
+    # ==========================
+
     if "youtube" in comando:
         hablar("Abriendo YouTube.")
         abrir_url("https://youtube.com")
@@ -173,20 +426,84 @@ def ejecutar_comando(comando):
         hablar("Abriendo Google.")
         abrir_url("https://google.com")
 
-    # SISTEMA
+    # ==========================
+    # PROGRAMAS
+    # ==========================
+
     elif "terminal" in comando:
         hablar("Abriendo la terminal.")
         abrir_terminal()
 
-    elif "archivos" in comando or "carpeta" in comando or "explorador" in comando:
+    elif "archivos" in comando or "carpeta personal" in comando or "explorador" in comando:
         hablar("Abriendo el explorador de archivos.")
         abrir_archivos()
 
-    elif "visual studio" in comando or "vscode" in comando or "vs code" in comando or "code" in comando:
+    elif "visual studio" in comando or "vscode" in comando or "vs code" in comando:
         hablar("Abriendo Visual Studio Code.")
         abrir_vscode()
 
+    elif "chrome" in comando:
+        if shutil.which("google-chrome"):
+            hablar("Abriendo Chrome.")
+            subprocess.Popen(["google-chrome"])
+        elif shutil.which("chromium"):
+            hablar("Abriendo Chromium.")
+            subprocess.Popen(["chromium"])
+        elif shutil.which("chromium-browser"):
+            hablar("Abriendo Chromium.")
+            subprocess.Popen(["chromium-browser"])
+        else:
+            hablar("No encontré Chrome o Chromium instalado.")
+
+    elif "steam" in comando:
+        if shutil.which("steam"):
+            hablar("Abriendo Steam.")
+            subprocess.Popen(["steam"])
+        else:
+            hablar("No encontré Steam instalado.")
+
+    # ==========================
+    # ARCHIVOS
+    # ==========================
+
+    elif "crea una carpeta" in comando or "crear una carpeta" in comando or "crea carpeta" in comando or "crear carpeta" in comando:
+        comando_crear_carpeta(comando)
+
+    elif "pdf" in comando or "pdfs" in comando:
+        comando_mostrar_pdfs(comando)
+
+    elif "busca" in comando or "buscar" in comando:
+        comando_buscar_archivo(comando)
+
+    # ==========================
+    # MEMORIA
+    # ==========================
+
+    elif (
+        "recuerda que" in comando
+        or "recuérdame que" in comando
+        or "recuerdame que" in comando
+        or "guarda en memoria" in comando
+        or "memoriza que" in comando
+        or "aprende que" in comando
+    ):
+        comando_guardar_memoria(comando)
+
+    elif (
+        "cuando hablamos" in comando
+        or "cuándo hablamos" in comando
+        or "que recuerdas" in comando
+        or "qué recuerdas" in comando
+        or "busca en memoria" in comando
+        or "busca en tu memoria" in comando
+        or "recuerdas algo" in comando
+    ):
+        comando_buscar_memoria(comando)
+
+    # ==========================
     # FECHA Y HORA
+    # ==========================
+
     elif "hora" in comando:
         hora = datetime.datetime.now().strftime("%H:%M")
         hablar(f"Son las {hora}")
@@ -195,12 +512,18 @@ def ejecutar_comando(comando):
         fecha = datetime.datetime.now().strftime("%d/%m/%Y")
         hablar(f"Hoy es {fecha}")
 
-    # SALIR
+    # ==========================
+    # CONTROL DEL ASISTENTE
+    # ==========================
+
     elif "salir" in comando or "apágate" in comando or "apagate" in comando or "cerrar" in comando:
         hablar("Cerrando A.R.G.O.S.")
         sys.exit()
 
+    # ==========================
     # IA LOCAL
+    # ==========================
+
     else:
         hablar("Consultando mi inteligencia local.")
         respuesta = preguntar_a_ollama(comando)
@@ -224,7 +547,7 @@ def escuchar():
         print("Escuchando...")
         r.adjust_for_ambient_noise(source, duration=0.5)
 
-        # Aumentado a 12 segundos para preguntas largas
+        # 12 segundos para permitir preguntas largas
         audio = r.listen(source, phrase_time_limit=12)
 
     try:
@@ -268,7 +591,8 @@ def limpiar_comando(texto, palabra_activacion):
         "puedes",
         "puedes hacer",
         "me puedes",
-        "quiero que"
+        "quiero que",
+        "necesito que"
     ]
 
     for palabra in palabras_relleno:
@@ -282,6 +606,7 @@ def limpiar_comando(texto, palabra_activacion):
 # ==========================
 
 def main():
+    inicializar_memoria()
     hablar("Sistema A.R.G.O.S. iniciado.")
 
     while True:
