@@ -15,8 +15,9 @@ from file_manager import (
 
 from memory import (
     guardar_memoria,
-    buscar_memorias,
-    formatear_memorias,
+    buscar_todo_en_memoria,
+    obtener_contexto_relevante,
+    guardar_conversacion,
     inicializar_memoria
 )
 
@@ -33,7 +34,6 @@ PALABRAS_ACTIVACION = [
     "asistente"
 ]
 
-# Modelo instalado en Ollama
 MODELO_OLLAMA = "llama3:latest"
 
 r = sr.Recognizer()
@@ -51,6 +51,14 @@ def hablar(texto):
 
     texto_limpio = str(texto).replace('"', "'")
     os.system(f'espeak-ng -v es "{texto_limpio}"')
+
+
+def responder_y_guardar(comando, respuesta, source="local"):
+    """
+    Habla una respuesta y guarda la interacción en memoria automática.
+    """
+    hablar(respuesta)
+    guardar_conversacion(comando, respuesta, source=source)
 
 
 # ==========================
@@ -83,9 +91,9 @@ def abrir_terminal():
     for terminal in terminales:
         if shutil.which(terminal):
             subprocess.Popen([terminal])
-            return
+            return True
 
-    hablar("No encontré una terminal instalada.")
+    return False
 
 
 def abrir_archivos():
@@ -102,9 +110,9 @@ def abrir_archivos():
     for explorador in exploradores:
         if shutil.which(explorador):
             subprocess.Popen([explorador])
-            return
+            return True
 
-    hablar("No encontré un explorador de archivos instalado.")
+    return False
 
 
 def abrir_vscode():
@@ -113,19 +121,9 @@ def abrir_vscode():
     """
     if shutil.which("code"):
         subprocess.Popen(["code"])
-    else:
-        hablar("No encontré Visual Studio Code instalado.")
+        return True
 
-
-def abrir_programa(nombre_programa):
-    """
-    Intenta abrir un programa por nombre.
-    """
-    if shutil.which(nombre_programa):
-        subprocess.Popen([nombre_programa])
-        hablar(f"Abriendo {nombre_programa}.")
-    else:
-        hablar(f"No encontré el programa {nombre_programa} instalado.")
+    return False
 
 
 # ==========================
@@ -134,10 +132,11 @@ def abrir_programa(nombre_programa):
 
 def preguntar_a_ollama(pregunta):
     """
-    Envía preguntas generales a Ollama.
-    Si el comando no es local, A.R.G.O.S. responde con IA.
+    Envía preguntas generales a Ollama usando memoria previa como contexto.
     """
     try:
+        contexto = obtener_contexto_relevante(pregunta)
+
         respuesta = requests.post(
             "http://localhost:11434/api/generate",
             json={
@@ -149,10 +148,14 @@ Tu nombre completo es Asistente de Red para Gestión, Operación y Seguridad.
 Responde siempre en español.
 Responde de forma clara, breve y útil.
 Si el usuario pide un cálculo, muestra el procedimiento de forma sencilla.
-Si el usuario hace una pregunta científica, responde con una explicación fácil de entender.
+Si el usuario pregunta por algo que ya se habló antes, usa el contexto de memoria.
+Si no hay información previa relevante, responde con conocimiento general.
 Máximo 4 oraciones, excepto si el usuario pide más detalle.
 
-Pregunta del usuario:
+Contexto relevante de memoria:
+{contexto}
+
+Pregunta actual del usuario:
 {pregunta}
 """,
                 "stream": False
@@ -183,9 +186,6 @@ Pregunta del usuario:
 def comando_buscar_archivo(comando):
     """
     Busca archivos por palabras clave.
-    Ejemplos:
-    - argos busca mi tesis
-    - argos busca documento vidanta
     """
     consulta = comando
 
@@ -206,32 +206,33 @@ def comando_buscar_archivo(comando):
     consulta = consulta.strip()
 
     if not consulta:
-        hablar("Dime qué archivo quieres buscar.")
+        respuesta = "Dime qué archivo quieres buscar."
+        responder_y_guardar(comando, respuesta, source="files")
         return
 
     resultados = buscar_por_palabras_clave(consulta.split(), limite=5)
 
     if not resultados:
-        hablar("No encontré archivos relacionados.")
+        respuesta = "No encontré archivos relacionados."
+        responder_y_guardar(comando, respuesta, source="files")
         return
 
-    hablar(f"Encontré {len(resultados)} archivos relacionados.")
     print("\nResultados encontrados:")
 
     for i, archivo in enumerate(resultados, start=1):
         print(f"{i}. {archivo}")
 
     print()
-    hablar("Abriré el primer resultado.")
+
+    respuesta = f"Encontré {len(resultados)} archivos relacionados. Abriré el primer resultado."
+    hablar(respuesta)
     abrir_ruta(resultados[0])
+    guardar_conversacion(comando, respuesta, source="files")
 
 
 def comando_mostrar_pdfs(comando):
     """
     Busca PDFs relacionados con un tema.
-    Ejemplos:
-    - argos muéstrame pdfs de vidanta
-    - argos busca pdfs de tesis
     """
     tema = comando
 
@@ -258,31 +259,33 @@ def comando_mostrar_pdfs(comando):
     tema = tema.strip()
 
     if not tema:
-        hablar("Dime el tema de los PDFs que quieres buscar.")
+        respuesta = "Dime el tema de los PDFs que quieres buscar."
+        responder_y_guardar(comando, respuesta, source="files")
         return
 
     resultados = listar_pdfs_por_tema(tema, limite=10)
 
     if not resultados:
-        hablar("No encontré PDFs relacionados.")
+        respuesta = "No encontré PDFs relacionados."
+        responder_y_guardar(comando, respuesta, source="files")
         return
 
-    hablar(f"Encontré {len(resultados)} PDFs relacionados.")
     print("\nPDFs encontrados:")
 
     for i, archivo in enumerate(resultados, start=1):
         print(f"{i}. {archivo}")
 
     print()
-    hablar("Abriré el primer PDF encontrado.")
+
+    respuesta = f"Encontré {len(resultados)} PDFs relacionados. Abriré el primer PDF encontrado."
+    hablar(respuesta)
     abrir_ruta(resultados[0])
+    guardar_conversacion(comando, respuesta, source="files")
 
 
 def comando_crear_carpeta(comando):
     """
     Crea una carpeta en el escritorio y la abre.
-    Ejemplo:
-    - argos crea una carpeta llamada pipe en escritorio y ábrela
     """
     nombre = comando
 
@@ -311,11 +314,12 @@ def comando_crear_carpeta(comando):
     nombre = nombre.strip()
 
     if not nombre:
-        hablar("Dime el nombre de la carpeta.")
+        respuesta = "Dime el nombre de la carpeta."
+        responder_y_guardar(comando, respuesta, source="files")
         return
 
     resultado = crear_carpeta_en_escritorio(nombre)
-    hablar(resultado)
+    responder_y_guardar(comando, resultado, source="files")
 
 
 # ==========================
@@ -324,10 +328,7 @@ def comando_crear_carpeta(comando):
 
 def comando_guardar_memoria(comando):
     """
-    Guarda una memoria.
-    Ejemplos:
-    - argos recuerda que hablamos del examen de física el 12/01/2026
-    - argos guarda en memoria que mi proyecto se llama ARGOS
+    Guarda una memoria explícita.
     """
     contenido = comando
 
@@ -347,19 +348,23 @@ def comando_guardar_memoria(comando):
     contenido = contenido.strip()
 
     if not contenido:
-        hablar("Dime qué quieres que recuerde.")
+        respuesta = "Dime qué quieres que recuerde."
+        responder_y_guardar(comando, respuesta, source="memory")
         return
 
     respuesta = guardar_memoria(contenido)
     hablar(respuesta)
 
+    guardar_conversacion(
+        comando,
+        f"{respuesta} Contenido guardado: {contenido}",
+        source="memory"
+    )
+
 
 def comando_buscar_memoria(comando):
     """
-    Busca recuerdos guardados.
-    Ejemplos:
-    - argos cuándo hablamos del examen de física
-    - argos qué recuerdas de vidanta
+    Busca en memoria explícita y memoria automática.
     """
     consulta = comando
 
@@ -375,7 +380,10 @@ def comando_buscar_memoria(comando):
         "recuerdas algo de",
         "recuerdas algo sobre",
         "busca en memoria",
-        "busca en tu memoria"
+        "busca en tu memoria",
+        "busca en tus recuerdos",
+        "qué sabes de",
+        "que sabes de"
     ]
 
     for frase in frases_a_quitar:
@@ -384,17 +392,18 @@ def comando_buscar_memoria(comando):
     consulta = consulta.strip()
 
     if not consulta:
-        hablar("Dime qué quieres que busque en mi memoria.")
+        respuesta = "Dime qué quieres que busque en mi memoria."
+        responder_y_guardar(comando, respuesta, source="memory")
         return
 
-    resultados = buscar_memorias(consulta)
-    respuesta = formatear_memorias(resultados)
+    respuesta = buscar_todo_en_memoria(consulta)
 
     print("\nMemoria:")
     print(respuesta)
     print()
 
     hablar(respuesta)
+    guardar_conversacion(comando, respuesta, source="memory")
 
 
 # ==========================
@@ -415,52 +424,74 @@ def ejecutar_comando(comando):
     # ==========================
 
     if "youtube" in comando:
-        hablar("Abriendo YouTube.")
+        respuesta = "Abriendo YouTube."
+        hablar(respuesta)
         abrir_url("https://youtube.com")
+        guardar_conversacion(comando, respuesta, source="apps")
 
     elif "whatsapp" in comando or "guasap" in comando or "what's up" in comando:
-        hablar("Abriendo WhatsApp.")
+        respuesta = "Abriendo WhatsApp."
+        hablar(respuesta)
         abrir_url("https://web.whatsapp.com")
+        guardar_conversacion(comando, respuesta, source="apps")
 
     elif "google" in comando:
-        hablar("Abriendo Google.")
+        respuesta = "Abriendo Google."
+        hablar(respuesta)
         abrir_url("https://google.com")
+        guardar_conversacion(comando, respuesta, source="apps")
 
     # ==========================
     # PROGRAMAS
     # ==========================
 
     elif "terminal" in comando:
-        hablar("Abriendo la terminal.")
-        abrir_terminal()
+        if abrir_terminal():
+            respuesta = "Abriendo la terminal."
+        else:
+            respuesta = "No encontré una terminal instalada."
+
+        responder_y_guardar(comando, respuesta, source="apps")
 
     elif "archivos" in comando or "carpeta personal" in comando or "explorador" in comando:
-        hablar("Abriendo el explorador de archivos.")
-        abrir_archivos()
+        if abrir_archivos():
+            respuesta = "Abriendo el explorador de archivos."
+        else:
+            respuesta = "No encontré un explorador de archivos instalado."
+
+        responder_y_guardar(comando, respuesta, source="apps")
 
     elif "visual studio" in comando or "vscode" in comando or "vs code" in comando:
-        hablar("Abriendo Visual Studio Code.")
-        abrir_vscode()
+        if abrir_vscode():
+            respuesta = "Abriendo Visual Studio Code."
+        else:
+            respuesta = "No encontré Visual Studio Code instalado."
+
+        responder_y_guardar(comando, respuesta, source="apps")
 
     elif "chrome" in comando:
         if shutil.which("google-chrome"):
-            hablar("Abriendo Chrome.")
             subprocess.Popen(["google-chrome"])
+            respuesta = "Abriendo Chrome."
         elif shutil.which("chromium"):
-            hablar("Abriendo Chromium.")
             subprocess.Popen(["chromium"])
+            respuesta = "Abriendo Chromium."
         elif shutil.which("chromium-browser"):
-            hablar("Abriendo Chromium.")
             subprocess.Popen(["chromium-browser"])
+            respuesta = "Abriendo Chromium."
         else:
-            hablar("No encontré Chrome o Chromium instalado.")
+            respuesta = "No encontré Chrome o Chromium instalado."
+
+        responder_y_guardar(comando, respuesta, source="apps")
 
     elif "steam" in comando:
         if shutil.which("steam"):
-            hablar("Abriendo Steam.")
             subprocess.Popen(["steam"])
+            respuesta = "Abriendo Steam."
         else:
-            hablar("No encontré Steam instalado.")
+            respuesta = "No encontré Steam instalado."
+
+        responder_y_guardar(comando, respuesta, source="apps")
 
     # ==========================
     # ARCHIVOS
@@ -496,7 +527,10 @@ def ejecutar_comando(comando):
         or "qué recuerdas" in comando
         or "busca en memoria" in comando
         or "busca en tu memoria" in comando
+        or "busca en tus recuerdos" in comando
         or "recuerdas algo" in comando
+        or "qué sabes de" in comando
+        or "que sabes de" in comando
     ):
         comando_buscar_memoria(comando)
 
@@ -506,22 +540,26 @@ def ejecutar_comando(comando):
 
     elif "hora" in comando:
         hora = datetime.datetime.now().strftime("%H:%M")
-        hablar(f"Son las {hora}")
+        respuesta = f"Son las {hora}"
+        responder_y_guardar(comando, respuesta, source="time")
 
     elif "fecha" in comando or "día" in comando or "dia" in comando:
         fecha = datetime.datetime.now().strftime("%d/%m/%Y")
-        hablar(f"Hoy es {fecha}")
+        respuesta = f"Hoy es {fecha}"
+        responder_y_guardar(comando, respuesta, source="time")
 
     # ==========================
     # CONTROL DEL ASISTENTE
     # ==========================
 
     elif "salir" in comando or "apágate" in comando or "apagate" in comando or "cerrar" in comando:
-        hablar("Cerrando A.R.G.O.S.")
+        respuesta = "Cerrando A.R.G.O.S."
+        hablar(respuesta)
+        guardar_conversacion(comando, respuesta, source="system")
         sys.exit()
 
     # ==========================
-    # IA LOCAL
+    # IA LOCAL CON MEMORIA
     # ==========================
 
     else:
@@ -533,6 +571,7 @@ def ejecutar_comando(comando):
         print()
 
         hablar(respuesta)
+        guardar_conversacion(comando, respuesta, source="ollama")
 
 
 # ==========================
@@ -547,7 +586,6 @@ def escuchar():
         print("Escuchando...")
         r.adjust_for_ambient_noise(source, duration=0.5)
 
-        # 12 segundos para permitir preguntas largas
         audio = r.listen(source, phrase_time_limit=12)
 
     try:
@@ -621,7 +659,9 @@ def main():
             comando = limpiar_comando(texto, palabra_activacion)
 
             if comando == "":
-                hablar("Estoy escuchando.")
+                respuesta = "Estoy escuchando."
+                hablar(respuesta)
+                guardar_conversacion(texto, respuesta, source="system")
             else:
                 ejecutar_comando(comando)
 
