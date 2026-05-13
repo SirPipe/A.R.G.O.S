@@ -35,6 +35,13 @@ from system_tools import (
     resumen_temperatura
 )
 
+from automation import (
+    abrir_apps_trabajo,
+    crear_reporte_sistema,
+    backup_escritorio,
+    revisar_temperatura_simple
+)
+
 
 # ==========================
 # CONFIGURACIÓN GENERAL
@@ -719,6 +726,80 @@ def es_comando_estado_sistema(comando):
 
 
 # ==========================
+# AUTOMATIZACIONES
+# ==========================
+
+def comando_automatizacion(comando):
+    if (
+        "abre mis apps de trabajo" in comando
+        or "abre mis aplicaciones de trabajo" in comando
+        or "abrir mis apps de trabajo" in comando
+        or "modo trabajo" in comando
+    ):
+        respuesta = abrir_apps_trabajo()
+
+    elif (
+        "crea un reporte del sistema" in comando
+        or "crear reporte del sistema" in comando
+        or "haz un reporte del sistema" in comando
+        or "genera un reporte del sistema" in comando
+    ):
+        respuesta = crear_reporte_sistema()
+
+    elif (
+        "haz backup de mi escritorio" in comando
+        or "hacer backup de mi escritorio" in comando
+        or "respalda mi escritorio" in comando
+        or "respaldo de mi escritorio" in comando
+        or "copia de seguridad de mi escritorio" in comando
+    ):
+        respuesta = backup_escritorio()
+
+    elif (
+        "revisa la temperatura" in comando
+        or "revisar temperatura" in comando
+        or "alerta de temperatura" in comando
+        or "temperatura crítica" in comando
+        or "temperatura critica" in comando
+    ):
+        respuesta = revisar_temperatura_simple(limite=80)
+
+    else:
+        respuesta = "No reconocí esa automatización."
+
+    print("\nAutomatización:")
+    print(respuesta)
+    print()
+
+    responder_y_guardar(comando, respuesta, source="automation")
+
+
+def es_comando_automatizacion(comando):
+    frases = [
+        "abre mis apps de trabajo",
+        "abre mis aplicaciones de trabajo",
+        "abrir mis apps de trabajo",
+        "modo trabajo",
+        "crea un reporte del sistema",
+        "crear reporte del sistema",
+        "haz un reporte del sistema",
+        "genera un reporte del sistema",
+        "haz backup de mi escritorio",
+        "hacer backup de mi escritorio",
+        "respalda mi escritorio",
+        "respaldo de mi escritorio",
+        "copia de seguridad de mi escritorio",
+        "revisa la temperatura",
+        "revisar temperatura",
+        "alerta de temperatura",
+        "temperatura crítica",
+        "temperatura critica"
+    ]
+
+    return any(frase in comando for frase in frases)
+
+
+# ==========================
 # DETECTORES DE COMANDOS
 # ==========================
 
@@ -830,6 +911,9 @@ def ejecutar_comando(comando):
             respuesta = "No encontré Steam instalado."
 
         responder_y_guardar(comando, respuesta, source="apps")
+
+    elif es_comando_automatizacion(comando):
+        comando_automatizacion(comando)
 
     # IMPORTANTE:
     # Los comandos de archivos van antes que estado del sistema.
@@ -994,7 +1078,7 @@ def main():
 
         else:
             print("No dijiste la palabra de activación.")
-            print("Ejemplo: argos crea una carpeta llamada pipe en escritorio")
+            print("Ejemplo: argos abre mis apps de trabajo")
 
 
 if __name__ == "__main__":
