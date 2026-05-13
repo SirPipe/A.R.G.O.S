@@ -5,6 +5,7 @@ import subprocess
 
 
 HOME = Path.home()
+
 CARPETAS_BUSQUEDA = [
     HOME / "Desktop",
     HOME / "Escritorio",
@@ -27,6 +28,20 @@ def abrir_ruta(ruta):
         return f"Abriendo {ruta.name}"
     except Exception as e:
         return f"No pude abrir la ruta. Error: {e}"
+
+
+def obtener_escritorio():
+    escritorio = HOME / "Desktop"
+
+    if escritorio.exists():
+        return escritorio
+
+    escritorio = HOME / "Escritorio"
+
+    if escritorio.exists():
+        return escritorio
+
+    return None
 
 
 def buscar_archivos(texto_busqueda, extension=None, limite=10):
@@ -62,6 +77,9 @@ def buscar_archivos(texto_busqueda, extension=None, limite=10):
 
 
 def buscar_por_palabras_clave(palabras, extension=None, limite=10):
+    """
+    Busca solo archivos por palabras clave.
+    """
     resultados = []
 
     palabras = [
@@ -98,18 +116,100 @@ def buscar_por_palabras_clave(palabras, extension=None, limite=10):
     return resultados
 
 
+def buscar_elementos_por_palabras_clave(palabras, tipo="ambos", limite=10):
+    """
+    Busca archivos y/o carpetas por palabras clave.
+
+    tipo:
+    - "archivo"
+    - "carpeta"
+    - "ambos"
+    """
+    resultados = []
+
+    palabras = [
+        p.lower().strip()
+        for p in palabras
+        if len(p.strip()) > 1
+    ]
+
+    if not palabras:
+        return resultados
+
+    for carpeta_base in CARPETAS_BUSQUEDA:
+        if not carpeta_base.exists():
+            continue
+
+        try:
+            for elemento in carpeta_base.rglob("*"):
+                if len(resultados) >= limite:
+                    break
+
+                if tipo == "archivo" and not elemento.is_file():
+                    continue
+
+                if tipo == "carpeta" and not elemento.is_dir():
+                    continue
+
+                nombre = elemento.name.lower()
+
+                if any(p in nombre for p in palabras):
+                    resultados.append(elemento)
+
+        except PermissionError:
+            continue
+        except Exception:
+            continue
+
+    return resultados
+
+
+def buscar_en_escritorio(nombre, tipo="ambos", limite=10):
+    """
+    Busca archivos o carpetas directamente en el Escritorio/Desktop.
+    """
+    escritorio = obtener_escritorio()
+
+    if not escritorio:
+        return []
+
+    resultados = []
+    nombre = nombre.lower().strip()
+
+    if not nombre:
+        return []
+
+    try:
+        for elemento in escritorio.iterdir():
+            if len(resultados) >= limite:
+                break
+
+            if tipo == "archivo" and not elemento.is_file():
+                continue
+
+            if tipo == "carpeta" and not elemento.is_dir():
+                continue
+
+            if nombre in elemento.name.lower():
+                resultados.append(elemento)
+
+    except PermissionError:
+        pass
+    except Exception:
+        pass
+
+    return resultados
+
+
 def listar_pdfs_por_tema(tema, limite=10):
     palabras = tema.lower().split()
     return buscar_por_palabras_clave(palabras, extension=".pdf", limite=limite)
 
 
 def crear_carpeta_en_escritorio(nombre):
-    escritorio = HOME / "Desktop"
+    escritorio = obtener_escritorio()
 
-    if not escritorio.exists():
-        escritorio = HOME / "Escritorio"
-
-    if not escritorio.exists():
+    if not escritorio:
         return "No encontré la carpeta Escritorio o Desktop."
 
     nueva_carpeta = escritorio / nombre
@@ -118,6 +218,42 @@ def crear_carpeta_en_escritorio(nombre):
     abrir_ruta(nueva_carpeta)
 
     return f"Carpeta {nombre} creada y abierta en el escritorio."
+
+
+def mandar_a_papelera(ruta):
+    """
+    Manda un archivo o carpeta a la Papelera.
+    No elimina permanentemente.
+    """
+    ruta = Path(ruta).expanduser().resolve()
+
+    if not ruta.exists():
+        return f"No encontré el elemento: {ruta}"
+
+    try:
+        if shutil.which("gio"):
+            subprocess.run(["gio", "trash", str(ruta)], check=True)
+            return f"Moví {ruta.name} a la Papelera."
+
+        trash_dir = HOME / ".local" / "share" / "Trash" / "files"
+        trash_dir.mkdir(parents=True, exist_ok=True)
+
+        destino = trash_dir / ruta.name
+        contador = 1
+
+        while destino.exists():
+            if ruta.suffix:
+                destino = trash_dir / f"{ruta.stem}_{contador}{ruta.suffix}"
+            else:
+                destino = trash_dir / f"{ruta.name}_{contador}"
+
+            contador += 1
+
+        shutil.move(str(ruta), str(destino))
+        return f"Moví {ruta.name} a la Papelera."
+
+    except Exception as e:
+        return f"No pude moverlo a la Papelera. Error: {e}"
 
 
 def mover_archivo(origen, destino):

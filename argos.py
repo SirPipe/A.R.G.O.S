@@ -1,5 +1,4 @@
 import speech_recognition as sr
-import os
 import subprocess
 import datetime
 import sys
@@ -8,9 +7,12 @@ import requests
 
 from file_manager import (
     buscar_por_palabras_clave,
+    buscar_elementos_por_palabras_clave,
+    buscar_en_escritorio,
     listar_pdfs_por_tema,
     crear_carpeta_en_escritorio,
-    abrir_ruta
+    abrir_ruta,
+    mandar_a_papelera
 )
 
 from memory import (
@@ -37,26 +39,50 @@ PALABRAS_ACTIVACION = [
 MODELO_OLLAMA = "llama3:latest"
 
 r = sr.Recognizer()
+proceso_voz = None
 
 
 # ==========================
 # VOZ DE A.R.G.O.S.
 # ==========================
 
+def detener_voz():
+    global proceso_voz
+
+    try:
+        if proceso_voz and proceso_voz.poll() is None:
+            proceso_voz.terminate()
+            proceso_voz = None
+
+        subprocess.run(
+            ["pkill", "-f", "espeak-ng"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+    except Exception:
+        pass
+
+
 def hablar(texto):
-    """
-    Hace que A.R.G.O.S. hable usando espeak-ng.
-    """
+    global proceso_voz
+
     print(f"A.R.G.O.S.: {texto}")
 
     texto_limpio = str(texto).replace('"', "'")
-    os.system(f'espeak-ng -v es "{texto_limpio}"')
+
+    try:
+        detener_voz()
+        proceso_voz = subprocess.Popen(
+            ["espeak-ng", "-v", "es", texto_limpio],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except Exception as e:
+        print(f"No pude reproducir voz: {e}")
 
 
 def responder_y_guardar(comando, respuesta, source="local"):
-    """
-    Habla una respuesta y guarda la interacción en memoria automática.
-    """
     hablar(respuesta)
     guardar_conversacion(comando, respuesta, source=source)
 
@@ -66,9 +92,6 @@ def responder_y_guardar(comando, respuesta, source="local"):
 # ==========================
 
 def abrir_url(url):
-    """
-    Abre una URL en Firefox.
-    """
     try:
         subprocess.Popen(["firefox", url])
     except Exception as e:
@@ -76,9 +99,6 @@ def abrir_url(url):
 
 
 def abrir_terminal():
-    """
-    Busca una terminal instalada y la abre.
-    """
     terminales = [
         "gnome-terminal",
         "kgx",
@@ -97,9 +117,6 @@ def abrir_terminal():
 
 
 def abrir_archivos():
-    """
-    Abre el explorador de archivos de Ubuntu.
-    """
     exploradores = [
         "nautilus",
         "nemo",
@@ -116,9 +133,6 @@ def abrir_archivos():
 
 
 def abrir_vscode():
-    """
-    Abre Visual Studio Code si está instalado.
-    """
     if shutil.which("code"):
         subprocess.Popen(["code"])
         return True
@@ -131,9 +145,6 @@ def abrir_vscode():
 # ==========================
 
 def preguntar_a_ollama(pregunta):
-    """
-    Envía preguntas generales a Ollama usando memoria previa como contexto.
-    """
     try:
         contexto = obtener_contexto_relevante(pregunta)
 
@@ -184,9 +195,6 @@ Pregunta actual del usuario:
 # ==========================
 
 def comando_buscar_archivo(comando):
-    """
-    Busca archivos por palabras clave.
-    """
     consulta = comando
 
     palabras_a_quitar = [
@@ -231,9 +239,6 @@ def comando_buscar_archivo(comando):
 
 
 def comando_mostrar_pdfs(comando):
-    """
-    Busca PDFs relacionados con un tema.
-    """
     tema = comando
 
     palabras_a_quitar = [
@@ -284,9 +289,6 @@ def comando_mostrar_pdfs(comando):
 
 
 def comando_crear_carpeta(comando):
-    """
-    Crea una carpeta en el escritorio y la abre.
-    """
     nombre = comando
 
     frases_a_quitar = [
@@ -322,14 +324,118 @@ def comando_crear_carpeta(comando):
     responder_y_guardar(comando, resultado, source="files")
 
 
+def limpiar_nombre_para_borrar(comando):
+    consulta = comando.lower().strip()
+
+    frases_a_quitar = [
+        "borra la carpeta",
+        "borra carpeta",
+        "borra el archivo",
+        "borra archivo",
+        "borra el elemento",
+        "borra elemento",
+        "borra",
+        "borrar la carpeta",
+        "borrar carpeta",
+        "borrar el archivo",
+        "borrar archivo",
+        "borrar",
+        "elimina la carpeta",
+        "elimina carpeta",
+        "elimina el archivo",
+        "elimina archivo",
+        "elimina el elemento",
+        "elimina elemento",
+        "elimina",
+        "eliminar la carpeta",
+        "eliminar carpeta",
+        "eliminar el archivo",
+        "eliminar archivo",
+        "eliminar",
+        "manda a la papelera la carpeta",
+        "manda a la papelera el archivo",
+        "manda a la papelera",
+        "mueve a la papelera la carpeta",
+        "mueve a la papelera el archivo",
+        "mueve a la papelera",
+        "que está en el escritorio",
+        "que esta en el escritorio",
+        "está en el escritorio",
+        "esta en el escritorio",
+        "en el escritorio",
+        "en escritorio",
+        "la",
+        "el",
+        "mi",
+        "mis"
+    ]
+
+    for frase in frases_a_quitar:
+        consulta = consulta.replace(frase, " ")
+
+    consulta = " ".join(consulta.split())
+    return consulta
+
+
+def detectar_tipo_borrado(comando):
+    if "carpeta" in comando or "folder" in comando:
+        return "carpeta"
+
+    if "archivo" in comando or "documento" in comando:
+        return "archivo"
+
+    return "ambos"
+
+
+def comando_borrar_elemento(comando):
+    """
+    Manda archivos o carpetas a la Papelera.
+    Ejemplos:
+    - argos borra la carpeta pipe que está en el escritorio
+    - argos elimina el archivo prueba
+    - argos manda a la papelera pipe
+    """
+    tipo = detectar_tipo_borrado(comando)
+    consulta = limpiar_nombre_para_borrar(comando)
+
+    if not consulta:
+        respuesta = "Dime qué archivo o carpeta quieres mandar a la Papelera."
+        responder_y_guardar(comando, respuesta, source="files")
+        return
+
+    resultados = []
+
+    if "escritorio" in comando:
+        resultados = buscar_en_escritorio(consulta, tipo=tipo, limite=5)
+
+    if not resultados:
+        resultados = buscar_elementos_por_palabras_clave(consulta.split(), tipo=tipo, limite=5)
+
+    if not resultados:
+        respuesta = f"No encontré {tipo} relacionado con {consulta} para borrar."
+        responder_y_guardar(comando, respuesta, source="files")
+        return
+
+    print("\nElementos encontrados para borrar:")
+    for i, elemento in enumerate(resultados, start=1):
+        print(f"{i}. {elemento}")
+
+    print()
+
+    elemento = resultados[0]
+
+    respuesta_inicial = f"Encontré {elemento.name}. Lo mandaré a la Papelera."
+    hablar(respuesta_inicial)
+
+    resultado = mandar_a_papelera(elemento)
+    responder_y_guardar(comando, resultado, source="files")
+
+
 # ==========================
 # MEMORIA
 # ==========================
 
 def comando_guardar_memoria(comando):
-    """
-    Guarda una memoria explícita.
-    """
     contenido = comando
 
     frases_a_quitar = [
@@ -363,9 +469,6 @@ def comando_guardar_memoria(comando):
 
 
 def comando_buscar_memoria(comando):
-    """
-    Busca en memoria explícita y memoria automática.
-    """
     consulta = comando
 
     frases_a_quitar = [
@@ -411,18 +514,26 @@ def comando_buscar_memoria(comando):
 # ==========================
 
 def ejecutar_comando(comando):
-    """
-    Primero intenta ejecutar comandos locales.
-    Si no reconoce el comando, consulta a Ollama.
-    """
-
     comando = comando.lower().strip()
     print("Comando recibido:", comando)
 
-    # ==========================
-    # NAVEGADOR / WEBS
-    # ==========================
+    # CONTROL DE VOZ
+    if (
+        comando == "alto"
+        or comando == "callate"
+        or comando == "cállate"
+        or comando == "silencio"
+        or comando == "detente"
+        or comando == "para"
+        or comando == "stop"
+    ):
+        detener_voz()
+        respuesta = "Voz detenida. Estoy escuchando."
+        print(f"A.R.G.O.S.: {respuesta}")
+        guardar_conversacion(comando, respuesta, source="system")
+        return
 
+    # NAVEGADOR / WEBS
     if "youtube" in comando:
         respuesta = "Abriendo YouTube."
         hablar(respuesta)
@@ -441,10 +552,7 @@ def ejecutar_comando(comando):
         abrir_url("https://google.com")
         guardar_conversacion(comando, respuesta, source="apps")
 
-    # ==========================
     # PROGRAMAS
-    # ==========================
-
     elif "terminal" in comando:
         if abrir_terminal():
             respuesta = "Abriendo la terminal."
@@ -493,23 +601,7 @@ def ejecutar_comando(comando):
 
         responder_y_guardar(comando, respuesta, source="apps")
 
-    # ==========================
-    # ARCHIVOS
-    # ==========================
-
-    elif "crea una carpeta" in comando or "crear una carpeta" in comando or "crea carpeta" in comando or "crear carpeta" in comando:
-        comando_crear_carpeta(comando)
-
-    elif "pdf" in comando or "pdfs" in comando:
-        comando_mostrar_pdfs(comando)
-
-    elif "busca" in comando or "buscar" in comando:
-        comando_buscar_archivo(comando)
-
-    # ==========================
     # MEMORIA
-    # ==========================
-
     elif (
         "recuerda que" in comando
         or "recuérdame que" in comando
@@ -534,10 +626,27 @@ def ejecutar_comando(comando):
     ):
         comando_buscar_memoria(comando)
 
-    # ==========================
-    # FECHA Y HORA
-    # ==========================
+    # ARCHIVOS
+    elif (
+        "borra" in comando
+        or "borrar" in comando
+        or "elimina" in comando
+        or "eliminar" in comando
+        or "manda a la papelera" in comando
+        or "mueve a la papelera" in comando
+    ):
+        comando_borrar_elemento(comando)
 
+    elif "crea una carpeta" in comando or "crear una carpeta" in comando or "crea carpeta" in comando or "crear carpeta" in comando:
+        comando_crear_carpeta(comando)
+
+    elif "pdf" in comando or "pdfs" in comando:
+        comando_mostrar_pdfs(comando)
+
+    elif "busca" in comando or "buscar" in comando:
+        comando_buscar_archivo(comando)
+
+    # FECHA Y HORA
     elif "hora" in comando:
         hora = datetime.datetime.now().strftime("%H:%M")
         respuesta = f"Son las {hora}"
@@ -548,20 +657,14 @@ def ejecutar_comando(comando):
         respuesta = f"Hoy es {fecha}"
         responder_y_guardar(comando, respuesta, source="time")
 
-    # ==========================
     # CONTROL DEL ASISTENTE
-    # ==========================
-
     elif "salir" in comando or "apágate" in comando or "apagate" in comando or "cerrar" in comando:
         respuesta = "Cerrando A.R.G.O.S."
         hablar(respuesta)
         guardar_conversacion(comando, respuesta, source="system")
         sys.exit()
 
-    # ==========================
-    # IA LOCAL CON MEMORIA
-    # ==========================
-
+    # IA LOCAL
     else:
         hablar("Consultando mi inteligencia local.")
         respuesta = preguntar_a_ollama(comando)
@@ -579,9 +682,6 @@ def ejecutar_comando(comando):
 # ==========================
 
 def escuchar():
-    """
-    Escucha por micrófono y convierte voz a texto.
-    """
     with sr.Microphone() as source:
         print("Escuchando...")
         r.adjust_for_ambient_noise(source, duration=0.5)
@@ -607,9 +707,6 @@ def escuchar():
 # ==========================
 
 def contiene_activacion(texto):
-    """
-    Verifica si el usuario dijo una palabra de activación.
-    """
     for palabra in PALABRAS_ACTIVACION:
         if palabra in texto:
             return palabra
@@ -618,9 +715,6 @@ def contiene_activacion(texto):
 
 
 def limpiar_comando(texto, palabra_activacion):
-    """
-    Quita la palabra de activación y limpia el comando.
-    """
     comando = texto.replace(palabra_activacion, "").strip()
 
     palabras_relleno = [
@@ -659,15 +753,19 @@ def main():
             comando = limpiar_comando(texto, palabra_activacion)
 
             if comando == "":
+                detener_voz()
                 respuesta = "Estoy escuchando."
                 hablar(respuesta)
                 guardar_conversacion(texto, respuesta, source="system")
             else:
+                if comando not in ["alto", "silencio", "detente", "para", "stop"]:
+                    detener_voz()
+
                 ejecutar_comando(comando)
 
         else:
             print("No dijiste la palabra de activación.")
-            print("Ejemplo: argos abre youtube")
+            print("Ejemplo: argos borra la carpeta pipe que está en el escritorio")
 
 
 if __name__ == "__main__":
